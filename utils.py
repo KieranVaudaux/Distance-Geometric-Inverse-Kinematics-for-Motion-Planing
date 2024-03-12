@@ -5,8 +5,6 @@ import scipy as sp
 import numpy as np
 
 
-# +
-
 def incidence_matrix_(
     G, nodelist=None, edgelist=None, oriented=False, weight=None, *, dtype=None
 ):
@@ -108,3 +106,18 @@ Rot_z = lambda a: np.array([[np.cos(a), -np.sin(a), 0],
 
 def wraptopi(e):
     return np.mod(e + np.pi, 2 * np.pi) - np.pi
+
+def max_min_distance_revolute(r, P, C, N):
+    delta = P-C
+    d_min_s = N.dot(delta)**2 + (np.linalg.norm(np.cross(N, delta)) - r)**2
+    if d_min_s > 0:
+        d_min = np.sqrt(d_min_s)
+    else:
+        d_min = 0
+    d_max_s = N.dot(delta)**2 + (np.linalg.norm(np.cross(N, delta)) + r)**2
+    if d_max_s > 0:
+        d_max = np.sqrt(d_max_s)
+    else:
+        d_max = 0
+
+    return d_max, d_min
