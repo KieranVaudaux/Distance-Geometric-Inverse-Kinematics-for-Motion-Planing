@@ -104,6 +104,22 @@ Rot_z = lambda a: np.array([[np.cos(a), -np.sin(a), 0],
                   [np.sin(a), np.cos(a), 0],
                  [0, 0, 1]])
 
+Rot_y = lambda a: np.array([[np.cos(a), 0, -np.sin(a)],
+                  [0, 1, 0],
+                 [np.sin(a), 0, np.cos(a)]])
+
+Rot_x = lambda a: np.array([[1, 0, 0],
+                  [0, np.cos(a), -np.sin(a)],
+                 [0, np.sin(a), np.cos(a)]])
+
+def rot_axis(axis):
+    if 'x':
+        return Rot_x
+    if 'y':
+        return Rot_y
+    if 'z':
+        return Rot_z
+
 def wraptopi(e):
     return np.mod(e + np.pi, 2 * np.pi) - np.pi
 
