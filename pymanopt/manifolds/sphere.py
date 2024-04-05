@@ -202,6 +202,9 @@ class SphereSubspaceComplementIntersection(
         super().__init__(projector, name, dimension)
 
 
+def _normalize(array):
+    #print('norm',array.shape)
+    return array / np.linalg.norm(array)
 
 class ComplementBall(RiemannianSubmanifold):
     def __init__(self, m: int, n: int, min_norm: np.ndarray, tol: float):
@@ -213,6 +216,7 @@ class ComplementBall(RiemannianSubmanifold):
         name = f"Product of complement of ball"
         dimension = m * n
         super().__init__(name, dimension)
+    
 
     @property
     def typical_dist(self):
@@ -229,29 +233,45 @@ class ComplementBall(RiemannianSubmanifold):
             )
         )
     
-    # To be modified ??
+    
+    def _weingarten(self, point, tangent_vector, normal_vector, min_norm):
+        norm_ = np.linalg.norm(point)
+        if norm_>min_norm:
+            return np.zeros_like(tangent_vector)
+        else:
+            return (
+                -self.inner_product(point, point, normal_vector) * tangent_vector
+            )
+    
     def weingarten(self, point, tangent_vector, normal_vector):
-        return np.zeros_like(tangent_vector)
-
+       return np.array([self._weingarten(p, v, normal, _min) for p, v, normal, _min in zip(point.transpose(),tangent_vector.transpose(),normal_vector.transpose(),self._min_norm)]).transpose()
+    
     def norm(self, point, tangent_vector):
         return np.linalg.norm(tangent_vector)
 
+    # To adapt ?
     def dist(self, point_a, point_b):
         return np.linalg.norm(point_a - point_b)
 
     def _projection(self, point, vector, _min):
         norm = np.linalg.norm(point)
         if norm > _min:
+            #print('v1',vector.shape)
             return vector
         else:
             inner = np.dot(vector,point)
             if inner > 0:
+                #print('v2',vector.shape)
                 return vector
             else:
-                return vector - inner*point/norm
+                #print('v3',(vector - inner*point).shape)
+                return vector - inner*point #/norm
     
     def projection(self, point, vector):
-        return np.array([self._projection(p, v, bound) for p, v, bound in zip(point.transpose(),vector.transpose(),self._min_norm)]).transpose()
+        #print('proj',point.shape,vector.shape,np.array([self._projection(point=p, vector=v, _min=bound) for p, v, bound in zip(point.transpose(),vector.transpose(),self._min_norm)]).transpose()
+    #.shape)
+        
+        return np.array([self._projection(point=p, vector=v, _min=bound) for p, v, bound in zip(point.transpose(),vector.transpose(),self._min_norm)]).transpose()
     
     to_tangent_space = projection
 
@@ -265,8 +285,7 @@ class ComplementBall(RiemannianSubmanifold):
                 return point + tangent_vector
             else:
                 norm = self.norm(point, tangent_vector)
-                return point * np.cos(norm) + tangent_vector * np.sinc(norm / np.pi)
-
+                return point * np.cos(norm) + tangent_vector * np.sinc(norm / np.pi)*norm
     
     def exp(self, point, tangent_vector):
         return np.array([self._exp(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
@@ -281,7 +300,7 @@ class ComplementBall(RiemannianSubmanifold):
                 return point + tangent_vector
             else:
                 norm = self.norm(point, tangent_vector)
-                return self._normalize(point + tangent_vector)*_min
+                return _normalize(point + tangent_vector)*norm
             
     def retraction(self, point, tangent_vector):
         return np.array([self._retraction(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
@@ -295,7 +314,12 @@ class ComplementBall(RiemannianSubmanifold):
             if inner > 0:
                 return point_b - point_a
             else:
-                return point_b - point_a - inner*point_a/norm
+                vector = self.projection(point_a, point_b - point_a)
+                distance = self.dist(point_a, point_b)
+                epsilon = np.finfo(np.float64).eps
+                factor = (distance + epsilon) / (self.norm(point_a, vector) + epsilon)
+                return factor * vector
+                #return point_b - point_a - inner*point_a/norm
     
     def log(self, point, tangent_vector):
         return np.array([self._log(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
@@ -303,12 +327,26 @@ class ComplementBall(RiemannianSubmanifold):
     def random_point(self):
         v = np.random.normal(size=self._shape)
         norm = np.linalg.norm(v,axis=0)
-        v = (norm + self._min_norm)*v
+        v = (norm + self._min_norm)*v/norm
         return v
+    
+    def _random_tangent_vector(self, point,_min):
+       
+        norm = np.linalg.norm(point)
+        tangent_vector = np.random.normal(size=point.shape)
+        if norm > _min:
+            #print('rand2',tangent_vector.shape)
+            return tangent_vector
+        else:
+            #print('rand3',_normalize(self._projection(point=point, vector=tangent_vector,_min=_min)).shape)
+            #print(point.shape,tangent_vector.shape)
+            return _normalize(self._projection(point=point, vector=tangent_vector,_min=_min))
 
     def random_tangent_vector(self, point):
-        tangent_vector = self.random_point()
-        return tangent_vector / self.norm(point, tangent_vector)
+        #print('rand',point.shape)
+        #print('out-rand',np.array([self._random_tangent_vector(p,_min) for p,_min in zip(point.transpose(),self._min_norm)]).shape)
+        return np.array([self._random_tangent_vector(point=p,_min=_min) for p,_min in zip(point.transpose(),self._min_norm)]).transpose()
+
 
     def _transport(self, point_a, point_b, tangent_vector_a,_min):
         norm = np.linalg.norm(point_a)
@@ -328,6 +366,131 @@ class ComplementBall(RiemannianSubmanifold):
         v = (point_a + point_b) / 2
         norm = np.linalg.norm(v)
         if norm < _min:
+            return _normalize(v)*_min
+        else: 
+            return v
+        
+    def pair_mean(self, point_a, point_b):
+        return np.array([self._pair_mean(p, v, bound) for p, v, bound in zip(point_a.transpose(),point_b.transpose(),self._min_norm)]).transpose()
+
+
+    def zero_vector(self, point):
+        return np.zeros(self._shape)
+    
+    
+    
+class Ball_(RiemannianSubmanifold):
+    def __init__(self, m: int, n: int, min_norm: np.ndarray, tol: float):
+        self._m = m
+        self._n = n
+        self._min_norm = min_norm
+        self._tol = tol
+        self._shape = (m,n)
+        name = f"Product of ball"
+        dimension = m * n
+        super().__init__(name, dimension)
+
+    @property
+    def typical_dist(self):
+        return np.pi * np.sqrt(self._n)
+
+    def inner_product(self, point, tangent_vector_a, tangent_vector_b):
+        return float(
+            np.real(
+                np.tensordot(
+                    tangent_vector_a.conj(),
+                    tangent_vector_b,
+                    axes=tangent_vector_a.ndim,
+                )
+            )
+        )
+    
+    
+    def weingarten(self, point, tangent_vector, normal_vector):
+       return np.zeros_like(tangent_vector)
+    
+    def norm(self, point, tangent_vector):
+        return np.linalg.norm(tangent_vector)
+
+    # To adapt ?
+    def dist(self, point_a, point_b):
+        return np.linalg.norm(point_a - point_b)
+
+
+    
+    def projection(self, point, vector):
+        return vector
+    
+    to_tangent_space = projection
+    exp = projection
+
+    def _retraction(self, point, tangent_vector, _min):
+        norm = np.linalg.norm(point + tangent_vector)
+        if norm < _min:
+            return point + tangent_vector
+        else:
+            return self._normalize(point + tangent_vector)*_min
+            
+    def retraction(self, point, tangent_vector):
+        return np.array([self._retraction(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
+
+    def _log(self, point_a, point_b,_min):
+        norm = np.linalg.norm(point_a)
+        if norm < _min:
+            return point_b - point_a
+        else:
+            inner = np.dot(point_b - point_a,point_a)
+            if inner < 0:
+                return point_b - point_a
+            else:
+                vector = self.projection(point_a, point_b - point_a)
+                distance = self.dist(point_a, point_b)
+                epsilon = np.finfo(np.float64).eps
+                factor = (distance + epsilon) / (self.norm(point_a, vector) + epsilon)
+                return factor * vector
+                #return point_b - point_a - inner*point_a/norm
+    
+    def log(self, point, tangent_vector):
+        return np.array([self._log(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
+
+    def random_point(self):
+        v = np.random.normal(size=self._shape)
+        norm = np.linalg.norm(v,axis=0)
+        v = (norm + self._min_norm)*v/norm
+        return v
+    
+    def _random_tangent_vector(self, point,_min):
+        #print('rand1',point.shape)
+        norm = np.linalg.norm(point)
+        tangent_vector = np.random.normal(size=point.shape)
+        if norm < _min:
+            return tangent_vector
+        else:
+            return self._normalize(self.projection(point, tangent_vector))
+
+    def random_tangent_vector(self, point):
+        #print('rand',point.shape)
+        return np.array([self._random_tangent_vector(p,_min) for p,_min in zip(point.transpose(),self._min_norm)]).transpose()
+
+
+    def _transport(self, point_a, point_b, tangent_vector_a,_min):
+        norm = np.linalg.norm(point_a)
+        if norm < _min:
+            return tangent_vector_a
+        else:
+            inner = np.dot(tangent_vector_a,point_b)
+            if inner < 0:
+                return tangent_vector_a
+            else:
+                return tangent_vector_a - inner*point_b/np.linalg.norm(point_b)
+    
+    def transport(self, point_a, point_b, tangent_vector_a):
+        return np.array([self._transport(p1, p2, v, bound) for p1, p2, v, bound in zip(point_a.transpose(),point_b.transpose(),tangent_vector_a.transpose(),self._min_norm)]).transpose()
+
+    def _pair_mean(self, point_a, point_b, _min):
+        v = (point_a + point_b) / 2
+        norm = np.linalg.norm(v)
+        if norm > _min:
             return self._normalize(v)*_min
         else: 
             return v
@@ -343,7 +506,177 @@ class ComplementBall(RiemannianSubmanifold):
         return array / np.linalg.norm(array)
     
 
+##############
 class Ball(RiemannianSubmanifold):
+    def __init__(self, m: int, n: int, min_norm: np.ndarray, tol: float):
+        self._m = m
+        self._n = n
+        self._min_norm = min_norm
+        self._tol = tol
+        self._shape = (m,n)
+        name = f"Product of ball"
+        dimension = m * n
+        super().__init__(name, dimension)
+
+    @property
+    def typical_dist(self):
+        return np.pi * np.sqrt(self._n)
+
+    def inner_product(self, point, tangent_vector_a, tangent_vector_b):
+        return float(
+            np.real(
+                np.tensordot(
+                    tangent_vector_a.conj(),
+                    tangent_vector_b,
+                    axes=tangent_vector_a.ndim,
+                )
+            )
+        )
+    
+    
+    def _weingarten(self, point, tangent_vector, normal_vector, min_norm):
+        norm_ = np.linalg.norm(point)
+        if norm_<min_norm:
+            return np.zeros_like(tangent_vector)
+        else:
+            return (
+                -self.inner_product(point, point, normal_vector) * tangent_vector
+            )
+    
+    def weingarten(self, point, tangent_vector, normal_vector):
+       return np.array([self._weingarten(p, v, normal, _min) for p, v, normal, _min in zip(point.transpose(),tangent_vector.transpose(),normal_vector.transpose(),self._min_norm)]).transpose()
+    
+    def norm(self, point, tangent_vector):
+        return np.linalg.norm(tangent_vector)
+
+    # To adapt ?
+    def dist(self, point_a, point_b):
+        return np.linalg.norm(point_a - point_b)
+
+    def _projection(self, point, vector, _min):
+        norm = np.linalg.norm(point)
+        if norm < _min:
+            #print('v1',vector)
+            return vector
+        else:
+            inner = np.dot(vector,point)
+            if inner < 0:
+                #print('v2',vector)
+                return vector
+            else:
+                #print('v3',(vector - inner*point))
+                return vector - inner*point #/norm
+    
+    def projection(self, point, vector):
+        #print(vector.shape)
+        return np.array([self._projection(p, v, bound) for p, v, bound in zip(point.transpose(),vector.transpose(),self._min_norm)]).transpose()
+    
+    to_tangent_space = projection
+
+    def _exp(self, point, tangent_vector, _min):
+        norm = np.linalg.norm(point)
+        if norm < _min:
+            return point + tangent_vector
+        else:
+            inner = np.dot(tangent_vector,point)
+            if inner < 0:
+                return point + tangent_vector
+            else:
+                norm = self.norm(point, tangent_vector)
+                return point * np.cos(norm) + tangent_vector * np.sinc(norm / np.pi)*norm
+
+    
+    def exp(self, point, tangent_vector):
+        return np.array([self._exp(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
+    
+    def _retraction(self, point, tangent_vector, _min):
+        norm = np.linalg.norm(point)
+        if norm < _min:
+            return point + tangent_vector
+        else:
+            inner = np.dot(tangent_vector,point)
+            if inner < 0:
+                return point + tangent_vector
+            else:
+                norm = self.norm(point, tangent_vector)
+                return self._normalize(point + tangent_vector)*norm
+            
+    def retraction(self, point, tangent_vector):
+        return np.array([self._retraction(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
+
+    def _log(self, point_a, point_b,_min):
+        norm = np.linalg.norm(point_a)
+        if norm < _min:
+            return point_b - point_a
+        else:
+            inner = np.dot(point_b - point_a,point_a)
+            if inner < 0:
+                return point_b - point_a
+            else:
+                vector = self.projection(point_a, point_b - point_a)
+                distance = self.dist(point_a, point_b)
+                epsilon = np.finfo(np.float64).eps
+                factor = (distance + epsilon) / (self.norm(point_a, vector) + epsilon)
+                return factor * vector
+                #return point_b - point_a - inner*point_a/norm
+    
+    def log(self, point, tangent_vector):
+        return np.array([self._log(p, v, bound) for p, v, bound in zip(point.transpose(),tangent_vector.transpose(),self._min_norm)]).transpose()
+
+    def random_point(self):
+        v = np.random.normal(size=self._shape)
+        norm = np.linalg.norm(v,axis=0)
+        v = (norm < self._min_norm)*v + (1 - (norm < self._min_norm))*v*self._min_norm/(self._min_norm + norm)
+        return v
+    
+    def _random_tangent_vector(self, point,_min):
+        #print('rand1',point.shape)
+        norm = np.linalg.norm(point)
+        tangent_vector = np.random.normal(size=point.shape)
+        if norm < _min:
+            return tangent_vector
+        else:
+            return self._normalize(self.projection(point, tangent_vector))
+
+    def random_tangent_vector(self, point):
+        #print('rand',point.shape)
+        return np.array([self._random_tangent_vector(p,_min) for p,_min in zip(point.transpose(),self._min_norm)]).transpose()
+
+
+    def _transport(self, point_a, point_b, tangent_vector_a,_min):
+        norm = np.linalg.norm(point_a)
+        if norm < _min:
+            return tangent_vector_a
+        else:
+            inner = np.dot(tangent_vector_a,point_b)
+            if inner < 0:
+                return tangent_vector_a
+            else:
+                return tangent_vector_a - inner*point_b/np.linalg.norm(point_b)
+    
+    def transport(self, point_a, point_b, tangent_vector_a):
+        return np.array([self._transport(p1, p2, v, bound) for p1, p2, v, bound in zip(point_a.transpose(),point_b.transpose(),tangent_vector_a.transpose(),self._min_norm)]).transpose()
+
+    def _pair_mean(self, point_a, point_b, _min):
+        v = (point_a + point_b) / 2
+        norm = np.linalg.norm(v)
+        if norm > _min:
+            return self._normalize(v)*_min
+        else: 
+            return v
+        
+    def pair_mean(self, point_a, point_b):
+        return np.array([self._pair_mean(p, v, bound) for p, v, bound in zip(point_a.transpose(),point_b.transpose(),self._min_norm)]).transpose()
+
+
+    def zero_vector(self, point):
+        return np.zeros(self._shape)
+    
+    def _normalize(self, array):
+        return array / np.linalg.norm(array)
+    
+
+class Ball_(RiemannianSubmanifold):
     def __init__(self, m: int, n: int, max_norm: np.ndarray, tol: float):
         self._m = m
         self._n = n

@@ -44,7 +44,7 @@ from .sphere import (
     Sphere,
     SphereSubspaceComplementIntersection,
     SphereSubspaceIntersection,
-    ComplementBall,
+    ComplementBall,Ball
 )
 from .stiefel import Stiefel
 from .manifold import ConstantFactory
